@@ -776,21 +776,25 @@ function PackageBuilderModal({
               onClick={onConfirmPackage}
               disabled={actionLoading || filledCount !== quantity}
               style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
                 border: "none",
-                borderRadius: 18,
-                padding: "16px 30px",
-                fontSize: 16,
-                fontWeight: 900,
-                color: "#ffffff",
-                background:
-                  filledCount === quantity && !actionLoading
-                    ? "linear-gradient(135deg, #0f172a 0, #1d4ed8 100)"
-                    : "linear-gradient(135deg, #cbd5e1 0, #94a3b8 100)",
+                borderRadius: 12,
+                padding: "14px 32px",
+                fontSize: 15,
+                fontWeight: 500,
+                color: filledCount === quantity && !actionLoading ? "#E1F5EE" : "#94a3b8",
+                background: filledCount === quantity && !actionLoading ? "#1D9E75" : "#e2e8f0",
                 cursor: actionLoading || filledCount !== quantity ? "not-allowed" : "pointer",
                 minWidth: 220,
+                transition: "opacity 0.15s",
               }}
-            >
+            ><>
+              <i className="ti ti-circle-check" style={{ fontSize: 18 }} aria-hidden="true" />
               {actionLoading ? "Saving..." : "Confirm Package"}
+            </>
             </button>
           </div>
         </div>
@@ -807,12 +811,13 @@ function RequestCard({
   onOpenPackage,
   onTransfer,
 }) {
-  const stockSummary = request.stockSummary || {};
+  const stockSummary = request.stockSummary || request.raw?.stock_summary || request.raw?.stocksummary || {};
   const transferOptions = getTransferOptions(stockSummary);
   const stockByLocation = getStockByLocation(stockSummary);
-  const canOpenPackage =
-    (request.status === "PACKAGING" || request.status === "PENDING") &&
-    getCanFulfillAtAAJ(stockSummary);
+ console.log('canOpenPackage debug:', request.status, getCanFulfillAtAAJ(stockSummary), stockSummary);
+ const canOpenPackage =
+  (request.status === "PACKAGING" || request.status === "PENDING") &&
+  (getCanFulfillAtAAJ(stockSummary) || request.status === "PACKAGING");
 
   const canTransfer = request.status === "PENDING" && transferOptions.length > 0;
   const [transferPickerOpen, setTransferPickerOpen] = useState(false);
@@ -1098,15 +1103,18 @@ function RequestCard({
                 onClick={() => setTransferPickerOpen(true)}
                 disabled={actionLoading || !canTransfer}
                 style={{
-                  border: "1px solid #c7d2fe",
-                  borderRadius: 16,
-                  padding: "14px 20px",
-                  fontSize: 15,
-                  fontWeight: 800,
-                  color: canTransfer ? "#4338ca" : "#94a3b8",
-                  background: canTransfer ? "#eef2ff" : "#f1f5f9",
-                  cursor: actionLoading || !canTransfer ? "not-allowed" : "pointer",
-                }}
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  border: "1.5px solid #B5D4F4",
+  borderRadius: 12,
+  padding: "12px 20px",
+  fontSize: 14,
+  fontWeight: 500,
+  color: canTransfer ? "#185FA5" : "#94a3b8",
+  background: "transparent",
+  cursor: actionLoading || !canTransfer ? "not-allowed" : "pointer",
+}}
               >
                 Transfer
               </button>
@@ -1190,18 +1198,20 @@ function RequestCard({
               onClick={() => onOpenPackage(request.requestId)}
               disabled={!canOpenPackage || actionLoading}
               style={{
-                border: "none",
-                borderRadius: 16,
-                padding: "14px 26px",
-                fontSize: 15,
-                fontWeight: 800,
-                color: "#fff",
-                background: canOpenPackage
-                  ? "linear-gradient(135deg, #15803d 0, #22c55e 100)"
-                  : "linear-gradient(135deg, #cbd5e1 0, #94a3b8 100)",
-                cursor: !canOpenPackage || actionLoading ? "not-allowed" : "pointer",
-                minWidth: 190,
-              }}
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 8,
+  border: "none",
+  borderRadius: 12,
+  padding: "12px 24px",
+  fontSize: 14,
+  fontWeight: 500,
+  color: canOpenPackage ? "#E1F5EE" : "#94a3b8",
+  background: canOpenPackage ? "#1D9E75" : "#e2e8f0",
+  cursor: !canOpenPackage || actionLoading ? "not-allowed" : "pointer",
+  minWidth: 190,
+  justifyContent: "center",
+}}
             >
               {actionLoading ? "Working..." : request.status === "PACKAGING" ? "Resume Package" : "OK / Build Package"}
             </button>
@@ -1518,8 +1528,8 @@ export default function RequestCenter() {
       console.error("Open package error:", err);
       setError(err?.response?.data?.message || "Failed to open package builder.");
     } finally {
-      setActionLoadingId(null);
-    }
+  setActionLoadingId(null);  // ← must be here
+}
   };
 
   const persistDraft = async (requestId, nextSlots) => {

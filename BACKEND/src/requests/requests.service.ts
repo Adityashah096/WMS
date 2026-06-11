@@ -197,7 +197,7 @@ export class RequestsService {
         pr.id,
         pr.request_id,
         NULL AS robot_id,
-        NULL AS color_code_id,
+        NULL AS color,
         pr.product_name,
         pr.quantity,
         pr.status,
@@ -238,7 +238,7 @@ export class RequestsService {
       `SELECT
         pi.id,
         pi.pack_id,
-        r.id AS robot_id,
+       r.serial_number AS robot_id,
         pi.status::text AS status,
         pi.added_by,
         pi.removed_by,
@@ -250,7 +250,7 @@ export class RequestsService {
       FROM pack_items pi
       JOIN robots r ON r.serial_number = pi.robot_serial
       JOIN robot_series rs ON rs.series_id = r.series_id
-      LEFT JOIN color_codes cc ON cc.code = r.color_code_id
+      LEFT JOIN color_codes cc ON cc.color_name = r.color
       WHERE pi.pack_id = $1
       ORDER BY pi.id ASC`,
       [packId],
@@ -270,7 +270,7 @@ export class RequestsService {
       FROM robots r
       JOIN robot_series rs ON rs.series_id = r.series_id
       JOIN locations l ON l.location_id = r.current_location_id
-      LEFT JOIN color_codes cc ON cc.code = r.color_code_id
+      LEFT JOIN color_codes cc ON cc.color_name = r.color
       WHERE rs.type_name = $1
         AND ($2::text IS NULL OR LOWER(cc.color_name) = LOWER($2))
         AND r.condition = 'NEW'
@@ -302,15 +302,15 @@ export class RequestsService {
 
     return this.dataSource.query(
       `SELECT
-        r.id,
-        r.serial_number,
+       r.serial_number AS robot_id,
+r.serial_number,
         rs.type_name AS product_name,
         cc.color_name,
         l.location_name
       FROM robots r
       JOIN robot_series rs ON rs.series_id = r.series_id
       JOIN locations l ON l.location_id = r.current_location_id
-      LEFT JOIN color_codes cc ON cc.code = r.color_code_id
+      LEFT JOIN color_codes cc ON cc.color_name = r.color
       WHERE r.current_location_id = $1
         AND rs.type_name = $2
         AND ($3::text IS NULL OR LOWER(cc.color_name) = LOWER($3))
@@ -428,14 +428,14 @@ export class RequestsService {
 
     for (const serial of serialNumbers) {
       const robotRows = await this.dataSource.query(
-        `SELECT id FROM robots WHERE serial_number = $1 LIMIT 1`,
+        `SELECT serial_number FROM robots WHERE serial_number = $1 LIMIT 1`,
         [serial],
       );
 
-      const robotId = robotRows[0]?.id;
-      if (!robotId) {
-        throw new BadRequestException(`Robot with serial ${serial} not found`);
-      }
+      const robotId = robotRows[0]?.serial_number;
+if (!robotId) {
+  throw new BadRequestException(`Robot with serial ${serial} not found`);
+}
 
       await this.dataSource.query(
         `INSERT INTO pack_items
@@ -467,6 +467,15 @@ export class RequestsService {
         )
       : null;
 
+    const eligibleSerials = primaryProduct
+      ? await this.getEligibleSerialsAtLocation(
+          sourceLocationId,
+          primaryProduct.product_name,
+          primaryProduct.color_name,
+          pack?.id ?? null,
+        )
+      : [];
+
     return {
       request: {
         ...request,
@@ -491,6 +500,7 @@ export class RequestsService {
       selected_serials: items.map((item: any) => item.serial_number),
       selected_items: items,
       stock_summary: stockSummary,
+      eligible_serials: eligibleSerials,
     };
   }
 
@@ -687,7 +697,11 @@ export class RequestsService {
 
     if (!readScope.allLocations) {
       params.push(workflowLocation.locationId);
-      whereSql = `WHERE (fp.location_id = $1 OR fp.id IS NULL)`;
+      whereSql = `WHERE (
+  r.source_location_id = $1
+  OR fp.location_id = $1
+  OR fp.id IS NULL
+)`;
     }
 
     const rows = await this.dataSource.query(
