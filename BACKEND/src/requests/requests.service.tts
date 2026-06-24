@@ -238,7 +238,7 @@ export class RequestsService {
       `SELECT
         pi.id,
         pi.pack_id,
-        r.serial_number AS robot_id,
+       r.serial_number AS robot_id,
         pi.status::text AS status,
         pi.added_by,
         pi.removed_by,
@@ -260,6 +260,7 @@ export class RequestsService {
   private async getAvailableStockByLocation(product: string, color?: string | null, currentPackId?: number | null) {
     const normalizedProduct = String(product || '').trim();
     const normalizedColor = String(color || '').trim() || null;
+    const scopedPackId = currentPackId ?? null;
 
     return this.dataSource.query(
       `SELECT
@@ -275,9 +276,17 @@ export class RequestsService {
         AND r.condition = 'NEW'
         AND r.current_status <> 'IN_TRANSIT'
         AND l.is_active = true
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pack_items pi
+          JOIN fulfillment_packs fp ON fp.id = pi.pack_id
+          WHERE pi.robot_serial = r.serial_number
+            AND fp.status IN ('BUILDING', 'READY')
+            AND ($3::int IS NULL OR fp.id <> $3)
+        )
       GROUP BY l.location_id, l.location_name
       ORDER BY l.location_name`,
-      [normalizedProduct, normalizedColor],
+      [normalizedProduct, normalizedColor, scopedPackId],
     );
   }
 
@@ -289,11 +298,12 @@ export class RequestsService {
   ) {
     const normalizedProduct = String(product || '').trim();
     const normalizedColor = String(color || '').trim() || null;
+    const scopedPackId = currentPackId ?? null;
 
     return this.dataSource.query(
       `SELECT
-        r.serial_number AS robot_id,
-        r.serial_number,
+       r.serial_number AS robot_id,
+r.serial_number,
         rs.type_name AS product_name,
         cc.color_name,
         l.location_name
@@ -306,8 +316,16 @@ export class RequestsService {
         AND ($3::text IS NULL OR LOWER(cc.color_name) = LOWER($3))
         AND r.condition = 'NEW'
         AND r.current_status <> 'IN_TRANSIT'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pack_items pi
+          JOIN fulfillment_packs fp ON fp.id = pi.pack_id
+          WHERE pi.robot_serial = r.serial_number
+            AND fp.status IN ('BUILDING', 'READY')
+            AND ($4::int IS NULL OR fp.id <> $4)
+        )
       ORDER BY r.serial_number`,
-      [locationId, normalizedProduct, normalizedColor],
+      [locationId, normalizedProduct, normalizedColor, scopedPackId],
     );
   }
 
@@ -415,9 +433,9 @@ export class RequestsService {
       );
 
       const robotId = robotRows[0]?.serial_number;
-      if (!robotId) {
-        throw new BadRequestException(`Robot with serial ${serial} not found`);
-      }
+if (!robotId) {
+  throw new BadRequestException(`Robot with serial ${serial} not found`);
+}
 
       await this.dataSource.query(
         `INSERT INTO pack_items
@@ -430,41 +448,33 @@ export class RequestsService {
 
   private async buildPackagePayload(requestId: number, sourceLocationId = AAJ_LOCATION_ID) {
     const request = await this.getRequestById(requestId);
+    if (!request) {
+      throw new BadRequestException('Request not found');
+    }
 
-if (!request) {
-  throw new BadRequestException('Request not found');
-}
+    const products = await this.getRequestProducts(requestId);
+    const pack = await this.getPackByRequestId(requestId);
+    const items = pack ? await this.getPackItems(pack.id) : [];
 
-const products = await this.getRequestProducts(requestId);
+    const primaryProduct = products[0];
+    const stockSummary = primaryProduct
+      ? await this.getStockSummary(
+          primaryProduct.product_name,
+          Number(primaryProduct.quantity),
+          primaryProduct.color_name,
+          sourceLocationId,
+          pack?.id ?? null,
+        )
+      : null;
 
-const pack = await this.getPackByRequestId(requestId);
-
-const items = pack
-  ? await this.getPackItems(pack.id)
-  : [];
-   const eligibleSerialGroups = await Promise.all(
-  products.map(async (product: any) => ({
-    product_name: product.product_name,
-    color_name: product.color_name,
-    quantity: Number(product.quantity),
-
-    serials: await this.getEligibleSerialsAtLocation(
-      sourceLocationId,
-      product.product_name,
-      product.color_name,
-      pack?.id ?? null,
-    ),
-
-    stock_summary: await this.getStockSummary(
-      product.product_name,
-      Number(product.quantity),
-      product.color_name,
-      sourceLocationId,
-      pack?.id ?? null,
-    ),
-  }))
-);
-
+    const eligibleSerials = primaryProduct
+      ? await this.getEligibleSerialsAtLocation(
+          sourceLocationId,
+          primaryProduct.product_name,
+          primaryProduct.color_name,
+          pack?.id ?? null,
+        )
+      : [];
 
     return {
       request: {
@@ -489,12 +499,16 @@ const items = pack
         : null,
       selected_serials: items.map((item: any) => item.serial_number),
       selected_items: items,
-      stock_summary: eligibleSerialGroups[0]?.stock_summary || null,
-
-eligible_serials:
-  eligibleSerialGroups[0]?.serials || [],
-
-eligible_serial_groups: eligibleSerialGroups,
+      stock_summary: stockSummary,
+      eligible_serials: eligibleSerials,
+      eligible_serial_groups: [
+        {
+          product_name: primaryProduct?.product_name,
+          color_name: primaryProduct?.color_name,
+          quantity: Number(primaryProduct?.quantity || 0),
+          serials: eligibleSerials,
+        },
+      ],
     };
   }
 
@@ -535,6 +549,7 @@ eligible_serial_groups: eligibleSerialGroups,
         String(user.email || '').trim() ||
         'N/A';
 
+      // Convert max_activation string to boolean
       const maxActivationBool = 
         typeof input.maxActivation === 'string'
           ? input.maxActivation.toLowerCase() === 'yes'
@@ -889,179 +904,193 @@ eligible_serial_groups: eligibleSerialGroups,
     return this.buildPackagePayload(requestId, workflowLocation.locationId);
   }
 
-  async confirmPackage(requestId: number, input: PackageDraftInput, user: AuthenticatedUser) {
-    const request = await this.getRequestById(requestId);
-    if (!request) {
-      throw new BadRequestException('Request not found');
-    }
+ // ============================================================
+// PATCH: requests.service.ts — confirmPackage() method
+// Replace your existing confirmPackage() with this version.
+// The only addition is the "INSERT INTO demo_units" block
+// and the robot stock deduction block — everything else unchanged.
+// ============================================================
 
-    const pack = await this.getPackByRequestId(requestId);
-    if (!pack || pack.status !== 'DRAFT') {
-      throw new BadRequestException('No editable package draft was found for this request');
-    }
-
-    const workflowLocation = await this.getWorkflowLocation(input.locationId || pack.location_id);
-    this.ensureWorkflowAccess(user, workflowLocation.locationId);
-
-    const normalizedSerials = await this.validateDraftSerials(
-      requestId,
-      input.serialNumbers,
-      workflowLocation.locationId,
-      pack.id,
-    );
-
-    const products = await this.getRequestProducts(requestId);
-    const totalRequestedQty = products.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0);
-
-    if (normalizedSerials.length !== totalRequestedQty) {
-      throw new BadRequestException('Package confirmation requires the full requested quantity');
-    }
-
-    await this.replacePackItems(pack.id, normalizedSerials, user.user_id);
-
-    await this.dataSource.query(
-      `UPDATE fulfillment_packs
-      SET status = 'READY', out_triggered_at = NOW()
-      WHERE id = $1`,
-      [pack.id],
-    );
-
-    await this.dataSource.query(
-      `UPDATE requests
-      SET status = 'FULFILLED',
-          approved_at = COALESCE(approved_at, NOW()),
-          updated_at = NOW()
-      WHERE id = $1`,
-      [requestId],
-    );
-
-    await this.dataSource.query(
-      `INSERT INTO request_status_history
-      (request_id, old_status, new_status, changed_by, changed_at)
-      VALUES ($1, $2, 'FULFILLED', $3, NOW())`,
-      [requestId, request.status, user.user_id],
-    );
-
-    for (const serial of normalizedSerials) {
-      await this.dataSource.query(
-        `
-        UPDATE robots
-        SET
-            current_location_id = 5,
-            current_status = 'AT_DEMO_SAMPLE'
-        WHERE serial_number = $1
-        `,
-        [serial],
-      );
-    }
-
-    for (const serial of normalizedSerials) {
-      const robotRows = await this.dataSource.query(
-        `SELECT
-          r.serial_number,
-          rs.type_name   AS bot_name,
-          cc.color_name  AS color
-        FROM robots r
-        JOIN robot_series rs ON rs.series_id = r.series_id
-        LEFT JOIN color_codes cc ON cc.color_name = r.color
-        WHERE r.serial_number = $1
-        LIMIT 1`,
-        [serial],
-      );
-
-      const robot = robotRows[0];
-      if (!robot) continue;
-
-      await this.dataSource.query(
-        `INSERT INTO demo_units (
-          request_id,
-          pack_id,
-          serial_number,
-          bot_name,
-          color,
-          recipient_name,
-          recipient_email,
-          recipient_phone,
-          requesting_team,
-          for_whom,
-          manager_name,
-          reason,
-          collection_point,
-          delivery_address,
-          country,
-          max_duration,
-          dispatched_at,
-          request_submitted_at,
-          request_approved_at,
-          request_fulfilled_at,
-          dispatched_by_user_id
-        ) VALUES (
-          $1, $2, $3, $4, $5,
-          $6, $7, $8, $9, $10,
-          $11, $12, $13, $14, $15, $16,
-          NOW(), $17, $18, NOW(), $19
-        )`,
-        [
-          requestId,
-          pack.id,
-          serial,
-          robot.bot_name,
-          robot.color || null,
-          request.recipient_name || null,
-          request.email || null,
-          request.contact_number || null,
-          request.requesting_team || null,
-          request.for_whom || null,
-          request.manager_name || null,
-          request.reason || null,
-          request.collection_point || null,
-          request.delivery_address || null,
-          request.country || null,
-          request.max_duration || null,
-          request.submitted_at || null,
-          request.approved_at || null,
-          user.user_id,
-        ],
-      );
-    }
-
-    return this.buildPackagePayload(requestId, workflowLocation.locationId);
+async confirmPackage(requestId: number, input: PackageDraftInput, user: AuthenticatedUser) {
+  const request = await this.getRequestById(requestId);
+  if (!request) {
+    throw new BadRequestException('Request not found');
   }
 
-  async getDemoUnits(user: AuthenticatedUser) {
-    return this.dataSource.query(
+  const pack = await this.getPackByRequestId(requestId);
+  if (!pack || pack.status !== 'DRAFT') {
+    throw new BadRequestException('No editable package draft was found for this request');
+  }
+
+  const workflowLocation = await this.getWorkflowLocation(input.locationId || pack.location_id);
+  this.ensureWorkflowAccess(user, workflowLocation.locationId);
+
+  const normalizedSerials = await this.validateDraftSerials(
+    requestId,
+    input.serialNumbers,
+    workflowLocation.locationId,
+    pack.id,
+  );
+
+  const products = await this.getRequestProducts(requestId);
+  const totalRequestedQty = products.reduce((sum: number, item: any) => sum + Number(item.quantity || 0), 0);
+
+  if (normalizedSerials.length !== totalRequestedQty) {
+    throw new BadRequestException('Package confirmation requires the full requested quantity');
+  }
+
+  await this.replacePackItems(pack.id, normalizedSerials, user.user_id);
+
+  // ── 1. Mark fulfillment_packs as READY ──────────────────────────────────
+  await this.dataSource.query(
+    `UPDATE fulfillment_packs
+    SET status = 'READY', out_triggered_at = NOW()
+    WHERE id = $1`,
+    [pack.id],
+  );
+
+  // ── 2. Mark request as FULFILLED ────────────────────────────────────────
+  await this.dataSource.query(
+    `UPDATE requests
+    SET status = 'FULFILLED',
+        approved_at = COALESCE(approved_at, NOW()),
+        updated_at = NOW()
+    WHERE id = $1`,
+    [requestId],
+  );
+
+  await this.dataSource.query(
+    `INSERT INTO request_status_history
+    (request_id, old_status, new_status, changed_by, changed_at)
+    VALUES ($1, $2, 'FULFILLED', $3, NOW())`,
+    [requestId, request.status, user.user_id],
+  );
+
+  // ── 3. DEDUCT stock from robots table (mark as IN_TRANSIT / demo out) ───
+  // Sets current_status to IN_TRANSIT so they disappear from warehouse stock.
+  // When return flow is built, flip this back to AT_AAJ.
+  for (const serial of normalizedSerials) {
+  await this.dataSource.query(
+    `
+    UPDATE robots
+    SET
+        current_location_id = 5,
+        current_status = 'AT_DEMO_SAMPLE'
+    WHERE serial_number = $1
+    `,
+    [serial],
+  );
+}
+
+  // ── 4. INSERT into demo_units ────────────────────────────────────────────
+  // Fetch enriched robot data for each serial (bot_name, color)
+  for (const serial of normalizedSerials) {
+    const robotRows = await this.dataSource.query(
       `SELECT
-        du.id,
-        du.request_id,
-        du.pack_id,
-        du.serial_number,
-        du.bot_name,
-        du.color,
-        du.recipient_name,
-        du.recipient_email,
-        du.recipient_phone,
-        du.requesting_team,
-        du.for_whom,
-        du.manager_name,
-        du.reason,
-        du.collection_point,
-        du.delivery_address,
-        du.country,
-        du.max_duration,
-        du.dispatched_at,
-        du.request_submitted_at,
-        du.request_approved_at,
-        du.request_fulfilled_at,
-        du.fulfilment_duration_mins,
-        u.name AS dispatched_by_name
-      FROM demo_units du
-      LEFT JOIN users u
-        ON u.user_id = du.dispatched_by_user_id
-      ORDER BY du.dispatched_at DESC`,
+        r.serial_number,
+        rs.type_name   AS bot_name,
+        cc.color_name  AS color
+      FROM robots r
+      JOIN robot_series rs ON rs.series_id = r.series_id
+      LEFT JOIN color_codes cc ON cc.color_name = r.color
+      WHERE r.serial_number = $1
+      LIMIT 1`,
+      [serial],
+    );
+
+    const robot = robotRows[0];
+    if (!robot) continue;
+
+    await this.dataSource.query(
+      `INSERT INTO demo_units (
+        request_id,
+        pack_id,
+        serial_number,
+        bot_name,
+        color,
+        recipient_name,
+        recipient_email,
+        recipient_phone,
+        requesting_team,
+        for_whom,
+        manager_name,
+        reason,
+        collection_point,
+        delivery_address,
+        country,
+        max_duration,
+        dispatched_at,
+        request_submitted_at,
+        request_approved_at,
+        request_fulfilled_at,
+        dispatched_by_user_id
+      ) VALUES (
+        $1, $2, $3, $4, $5,
+        $6, $7, $8, $9, $10,
+        $11, $12, $13, $14, $15, $16,
+        NOW(), $17, $18, NOW(), $19
+      )`,
+      [
+        requestId,                          // $1
+        pack.id,                            // $2
+        serial,                             // $3
+        robot.bot_name,                     // $4
+        robot.color || null,                // $5
+        request.recipient_name || null,     // $6
+        request.email || null,              // $7
+        request.contact_number || null,     // $8
+        request.requesting_team || null,    // $9
+        request.for_whom || null,           // $10
+        request.manager_name || null,       // $11
+        request.reason || null,             // $12
+        request.collection_point || null,   // $13
+        request.delivery_address || null,   // $14
+        request.country || null,            // $15
+        request.max_duration || null,       // $16
+        request.submitted_at || null,       // $17
+        request.approved_at || null,        // $18
+        user.user_id,                       // $19
+      ],
     );
   }
 
-  async getAllPackages(user: AuthenticatedUser, locationId?: number) {
+  return this.buildPackagePayload(requestId, workflowLocation.locationId);
+}
+
+async getDemoUnits(user: AuthenticatedUser) {
+  return this.dataSource.query(
+    `SELECT
+      du.id,
+      du.request_id,
+      du.pack_id,
+      du.serial_number,
+      du.bot_name,
+      du.color,
+      du.recipient_name,
+      du.recipient_email,
+      du.recipient_phone,
+      du.requesting_team,
+      du.for_whom,
+      du.manager_name,
+      du.reason,
+      du.collection_point,
+      du.delivery_address,
+      du.country,
+      du.max_duration,
+      du.dispatched_at,
+      du.request_submitted_at,
+      du.request_approved_at,
+      du.request_fulfilled_at,
+      du.fulfilment_duration_mins,
+      u.name AS dispatched_by_name
+    FROM demo_units du
+    LEFT JOIN users u
+      ON u.user_id = du.dispatched_by_user_id
+    ORDER BY du.dispatched_at DESC`,
+  );
+}
+
+async getAllPackages(user: AuthenticatedUser, locationId?: number) {
     const readScope = this.resolveRequestReadScope(user, locationId);
     const workflowLocation = await this.getWorkflowLocation(readScope.locationId);
 

@@ -441,8 +441,45 @@ export class ScanService {
       [serial]
     );
 
+    const demoRes = await this.dataSource.query(
+      `
+      SELECT
+        request_id,
+        pack_id,
+        dispatched_at
+      FROM demo_units
+      WHERE serial_number = $1
+      ORDER BY dispatched_at DESC
+      LIMIT 1
+      `,
+      [serial],
+    );
+
     const { current_location_id, ...robot } = robotRes[0];
-    return { found: true, robot, history: historyRes };
+
+    if (demoRes.length > 0) {
+      historyRes.push({
+        scan_result: 'DEMO',
+        scanned_at: demoRes[0].dispatched_at,
+        location: 'Demo / Sample',
+        scanned_by: '',
+        destination: null,
+        request_id: demoRes[0].request_id,
+        pack_id: demoRes[0].pack_id,
+      });
+
+      historyRes.sort(
+        (a, b) =>
+          new Date(a.scanned_at).getTime() -
+          new Date(b.scanned_at).getTime(),
+      );
+    }
+
+    return {
+      found: true,
+      robot,
+      history: historyRes,
+    };
   }
 
   // ============================

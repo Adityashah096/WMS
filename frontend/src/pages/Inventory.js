@@ -58,15 +58,51 @@ export default function Inventory() {
     }
 
     try {
-      setLoading(true);
-      const url =
-        role === "ADMIN" && !scopedLocationId
-          ? `${API_URL}/scan/export`
-          : `${API_URL}/scan/export?location_id=${scopedLocationId}`;
-      const headers = { Authorization: `Bearer ${token}` };
-      const res = await axios.get(url, { headers });
-      setData(res.data);
-    } catch (err) {
+  setLoading(true);
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  const isDemoSample =
+    location.state?.locationName === "DEMO / SAMPLE";
+
+  if (isDemoSample) {
+    const res = await axios.get(
+      `${API_URL}/requests/demo-units`,
+      { headers }
+    );
+
+    const mappedData = res.data.map((unit) => ({
+      serial_number: unit.serial_number,
+      product: unit.bot_name,
+      color: unit.color || "N/A",
+
+      condition: "NEW",
+      current_status: "DEMO_DISPATCHED",
+      current_location: "DEMO / SAMPLE",
+
+      first_scanned_at:
+        unit.dispatched_at ||
+        unit.request_fulfilled_at,
+
+      request_id: unit.request_id,
+      recipient_name: unit.recipient_name,
+    }));
+
+    setData(mappedData);
+  } else {
+    const url =
+      role === "ADMIN" && !scopedLocationId
+        ? `${API_URL}/scan/export`
+        : `${API_URL}/scan/export?location_id=${scopedLocationId}`;
+
+    const res = await axios.get(url, { headers });
+
+    setData(res.data);
+  }
+}
+    catch (err) {
       console.error("Inventory fetch error", err);
       if (err.response?.status === 401) {
         setError("Unauthorized. Please log in again.");
@@ -84,14 +120,15 @@ export default function Inventory() {
   }, [fetchInventory]);
 
   useEffect(() => {
-    if (!location.state) return;
+  console.log("LOCATION STATE RECEIVED:", location.state);
 
-    setFilterType(location.state.product || "ALL");
-    setFilterColor(location.state.color || "ALL");
-    setFilterCondition(location.state.condition || "ALL");
-    setFilterStatus(location.state.status || "ALL");
-  }, [location.state]);
+  if (!location.state) return;
 
+  setFilterType(location.state.product || "ALL");
+  setFilterColor(location.state.color || "ALL");
+  setFilterCondition(location.state.condition || "ALL");
+  setFilterStatus(location.state.status || "ALL");
+}, [location.state]);
   // Reset color filter to "ALL" whenever the product type changes,
   // so a previously-selected color from another product does not linger.
   useEffect(() => {
@@ -146,8 +183,18 @@ export default function Inventory() {
     XLSX.utils.book_append_sheet(wb, ws, "Inventory");
     XLSX.writeFile(wb, `inventory_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
+  console.log({
+  filterType,
+  filterColor,
+  filterCondition,
+  filterStatus
+});
 
   const filteredData = data.filter((item) => {
+    console.log(
+  "Conditions in inventory:",
+  [...new Set(data.map(x => x.condition))]
+);
     const normalizedStatus = normalizeStatus(item.current_status);
     const matchSearch =
       search === "" ||

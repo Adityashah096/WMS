@@ -149,15 +149,19 @@ export class RequestsController {
     );
   }
 
-  @Put(':requestId/package-draft')
-  @UseGuards(JwtAuthGuard)
-  async savePackageDraft(
-    @Param('requestId', ParseIntPipe) requestId: number,
-    @Body() body: PackageDraftDto,
-    @Request() req,
-  ) {
-    return this.requestsService.savePackageDraft(requestId, body, req.user);
-  }
+@Put(':requestId/package-draft')
+@UseGuards(JwtAuthGuard)
+async savePackageDraft(
+  @Param('requestId', ParseIntPipe) requestId: number,
+  @Body() body: PackageDraftDto,
+  @Request() req,
+) {
+  return this.requestsService.savePackageDraft(
+    requestId,
+    body,
+    req.user,
+  );
+}
 
   @Post(':requestId/package-confirm')
   @UseGuards(JwtAuthGuard)
@@ -178,4 +182,11 @@ export class RequestsController {
   ) {
     return this.requestsService.transferToLocation(requestId, body, req.user);
   }
+
+  @Get('demo-units')
+  @UseGuards(JwtAuthGuard)
+  async getDemoUnits(@Request() req) {
+    return this.requestsService.getDemoUnits(req.user);
+  }
+
 }

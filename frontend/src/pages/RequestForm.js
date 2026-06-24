@@ -386,8 +386,16 @@ export default function RequestForm() {
     if (!requestingTeam) return setError("Please select the requesting team.");
     if (!reason.trim()) return setError("Please provide a reason for the demo requirement.");
     if (!recipientName.trim()) return setError("Please enter the recipient name.");
-    if (!managerName.trim()) return setError("Please enter the manager/SPOC name.");
     if (!email.trim()) return setError("Please enter an email address.");
+
+if (!/\S+@\S+\.\S+/.test(email))
+  return setError("Please enter a valid email address.");
+
+if (!contactNumber.trim())
+  return setError("Please enter a phone number.");
+    if (!managerName.trim()) return setError("Please enter the manager/SPOC name.");
+  if (!/\S+@\S+\.\S+/.test(email))
+  return setError("Please enter a valid email address.");
     if (!collectionPoint) return setError("Please select a collection point.");
 
     const invalidRow = productRows.find(
@@ -766,25 +774,26 @@ export default function RequestForm() {
 
             <div style={{ ...gridStyle, marginTop: 18 }}>
               <div>
-                <label style={labelStyle}>Email Address</label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="email@example.com"
-                  style={inputStyle}
-                />
+               <label style={labelStyle}>Email</label>
+<input
+  type="email"
+  value={email}
+  onChange={(e) => setEmail(e.target.value)}
+  placeholder="email@example.com"
+  style={inputStyle}
+/>
               </div>
 
               <div>
-                <label style={labelStyle}>Contact Number</label>
-                <input
-                  type="tel"
-                  value={contactNumber}
-                  onChange={(e) => setContactNumber(e.target.value)}
-                  placeholder="+91 00000 00000"
-                  style={inputStyle}
-                />
+               <label style={labelStyle}>Phone Number</label>
+<input
+  type="tel"
+  inputMode="tel"
+  value={contactNumber}
+  onChange={(e) => setContactNumber(e.target.value)}
+  placeholder="+91 9876543210"
+  style={inputStyle}
+/>
               </div>
             </div>
           </div>

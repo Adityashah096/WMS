@@ -12,6 +12,7 @@ import RequestCenterPalaiPlaza from "./pages/RequestCenter_PalaiPlaza";
 import Login from "./pages/Login";
 import Warehouses from "./pages/Warehouses";
 import WarehouseDashboard from "./pages/WarehouseDashboard";
+import DemoSample from "./pages/DemoSample";
 import Navbar from "./components/Navbar";
 import { isAdmin, isLoggedIn, getStoredUser } from "./utils/auth";
 
@@ -27,15 +28,12 @@ function ProtectedRoute({ children, requireAdmin = false }) {
   if (!isLoggedIn()) {
     return <Navigate to="/login" replace />;
   }
-
   if (requireAdmin && !isAdmin()) {
     return <Navigate to="/" replace />;
   }
-
   return children;
 }
 
-// Allows access if user is admin OR if their location_id maps to this route
 function LocationProtectedRoute({ children, allowedRoute }) {
   if (!isLoggedIn()) {
     return <Navigate to="/login" replace />;
@@ -44,7 +42,6 @@ function LocationProtectedRoute({ children, allowedRoute }) {
   const { locationId } = getStoredUser();
   const userRoute = LOCATION_ROUTE_MAP[Number(locationId)];
   if (userRoute === allowedRoute) return children;
-  // Redirect to their own center if they have one, otherwise dashboard
   return <Navigate to={userRoute || "/"} replace />;
 }
 
@@ -52,7 +49,6 @@ function PublicRoute({ children }) {
   if (isLoggedIn()) {
     return <Navigate to="/" replace />;
   }
-
   return children;
 }
 
@@ -154,6 +150,14 @@ function App() {
           element={
             <ProtectedRoute requireAdmin>
               <Warehouses />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/warehouses/demo-sample"
+          element={
+            <ProtectedRoute>
+              <DemoSample />
             </ProtectedRoute>
           }
         />

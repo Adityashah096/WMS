@@ -117,7 +117,10 @@ function normalizeRequest(raw = {}) {
     requestId: pick(raw.requestid, raw.request_id, raw.id),
     productName: firstProduct.product_name || pick(raw.productname, raw.product_name),
     productColor: firstProduct.color_name || pick(raw.productcolor, raw.product_color),
-    quantity: Number(firstProduct.quantity || pick(raw.quantity, raw.qty, 0)) || 0,
+    quantity: products.reduce(
+  (sum, p) => sum + Number(p.quantity || 0),
+  0
+),
     requesterName: pick(raw.requestername, raw.requester_name),
     requesterSurname: pick(raw.requestersurname, raw.requester_surname),
     requesterPhone: pick(raw.requesterphone, raw.requester_phone),
@@ -548,9 +551,20 @@ function PackageBuilderModal({
             }
           />
           <DetailBox label="Phone" value={builder.request.requesterPhone} />
-          <DetailBox label="Product" value={builder.request.productName} />
-          <DetailBox label="Color" value={builder.request.productColor || "Any"} />
-          <DetailBox label="Requested Qty" value={builder.request.quantity} />
+          <div style={{ gridColumn: "1 / -1" }}>
+  {builder.request.products.map((product, index) => (
+    <div key={index}>
+      {index + 1}. {product.product_name}
+      {product.color_name
+        ? ` - ${product.color_name}`
+
+        : ""}
+      (Qty {product.quantity})
+    </div>
+  ))}
+</div>
+          
+          
           <DetailBox label="Date" value={formatDate(builder.request.requestDate)} />
           <DetailBox label="From Location" value={builder.request.locationName} />
         </div>
@@ -613,6 +627,20 @@ function PackageBuilderModal({
 
           <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
             {builder.slots.map((serial, index) => {
+              const productGroup = builder.eligibleSerialGroups?.[index];
+
+const productName =
+  productGroup?.product_name ||
+  builder.request.productName;
+
+const productColor =
+  productGroup?.color_name ||
+  builder.request.productColor;
+
+const serialOptions =
+  productGroup?.serials ||
+  eligibleSerialOptions;
+            
               const isEditing = builder.editingIndex === index || !serial;
               const displayValue =
                 isEditing && builder.editingIndex === index ? builder.editValue : serial || "";
@@ -653,10 +681,10 @@ function PackageBuilderModal({
                   {isEditing ? (
                     <SerialComboBox
                       value={displayValue}
-                      options={eligibleSerialOptions}
+                      options={serialOptions}
                       usedElsewhere={usedElsewhere}
-                      productName={builder.request.productName}
-                      productColor={builder.request.productColor}
+                      productName={productName}
+                      productColor={productColor}
                       onChange={(val) => {
                         if (builder.editingIndex !== index) {
                           onStartReplace(index, val);
@@ -876,6 +904,7 @@ function RequestCard({
           gap: 12,
           marginTop: 18,
         }}
+
       >
         <DetailBox label="Name" value={request.requesterName} />
         <DetailBox label="Surname" value={request.requesterSurname} />
@@ -960,6 +989,7 @@ function RequestCard({
                         }}
                       >
                         {index + 1}
+                        
                       </div>
                       <div>
                         <div style={{ color: "#0f172a", fontWeight: 700 }}>{locationName}</div>
@@ -1351,7 +1381,7 @@ export default function RequestCenter() {
   const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("ALL");
+  const [statusFilter, setStatusFilter] = useState("PENDING");
   const [sortBy, setSortBy] = useState("DELIVERYDATE");
   const [actionLoadingId, setActionLoadingId] = useState(null);
   const [actionMessage, setActionMessage] = useState("");
@@ -1361,7 +1391,10 @@ export default function RequestCenter() {
     request: null,
     package: null,
     eligibleSerials: [],
+    eligibleSerialGroups: [],
+  
     stockSummary: null,
+    
     slots: [],
     editingIndex: null,
     editValue: "",
@@ -1383,18 +1416,34 @@ export default function RequestCenter() {
 
   const applyBuilderPayload = useCallback((payload) => {
     const normalizedRequest = normalizeRequest(payload?.request || {});
-    const quantity = Number(normalizedRequest?.quantity || 0);
+    const quantity =
+  normalizedRequest?.products?.reduce(
+    (sum, p) => sum + Number(p.quantity || 0),
+    0
+  ) || Number(normalizedRequest?.quantity || 0);
 
-    setBuilder({
-      open: true,
-      request: normalizedRequest,
-      package: payload?.package || null,
-      eligibleSerials: payload?.eligible_serials || payload?.eligibleserials || [],
-      stockSummary: payload?.stock_summary || payload?.stocksummary || null,
-      slots: padSlots(payload?.selected_serials || payload?.selectedserials || [], quantity),
-      editingIndex: null,
-      editValue: "",
-    });
+setBuilder({
+  open: true,
+  request: normalizedRequest,
+  package: payload?.package || null,
+
+  eligibleSerials:
+    payload?.eligible_serials || payload?.eligibleserials || [],
+
+  eligibleSerialGroups:
+    payload?.eligible_serial_groups || [],
+
+  stockSummary:
+    payload?.stock_summary || payload?.stocksummary || null,
+
+  slots: padSlots(
+    payload?.selected_serials || payload?.selectedserials || [],
+    quantity
+  ),
+
+  editingIndex: null,
+  editValue: "",
+});
   }, []);
 
   const fetchRequests = useCallback(async () => {
@@ -1474,10 +1523,15 @@ export default function RequestCenter() {
   const filteredRequests = useMemo(() => {
     let list = [...requests];
 
-    if (statusFilter !== "ALL") {
-      list = list.filter((request) => normalizeStatus(request.status) === statusFilter);
-    }
-
+    if (statusFilter === "PENDING") {
+  list = list.filter((request) =>
+    ["PENDING", "PACKAGING"].includes(normalizeStatus(request.status))
+  );
+} else if (statusFilter !== "ALL") {
+  list = list.filter(
+    (request) => normalizeStatus(request.status) === statusFilter
+  );
+}
     if (sortBy === "DELIVERYDATE") {
       list.sort((a, b) => {
         const dateA = extractDeliveryDate(a.note);
@@ -1649,11 +1703,13 @@ export default function RequestCenter() {
     if (!requestId || builder.editingIndex !== index) return;
 
     const candidate = String(builder.editValue || "").trim();
-    const eligibleSet = new Set(
-      builder.eligibleSerials.map((serial) =>
-        String(serial.serialnumber || serial.serial_number || "").trim()
-      )
-    );
+    const productGroup = builder.eligibleSerialGroups?.[index];
+
+const eligibleSet = new Set(
+  (productGroup?.serials || []).map((serial) =>
+    String(serial.serialnumber || serial.serial_number || "").trim()
+  )
+);
 
     if (!candidate) {
       setBuilderError("Please paste or enter a serial number before applying.");
@@ -1661,11 +1717,13 @@ export default function RequestCenter() {
     }
 
     if (!eligibleSet.has(candidate)) {
-      setBuilderError(
-        `Serial ${candidate} is not valid for ${builder.request.productName}${
-          builder.request.productColor ? ` / ${builder.request.productColor}` : ""
-        } at AAJ NEW stock.`
-      );
+    setBuilderError(
+  `Serial ${candidate} is not valid for ${productGroup?.product_name}${
+    productGroup?.color_name
+      ? ` / ${productGroup.color_name}`
+      : ""
+  } at AAJ NEW stock.`
+);
       return;
     }
 
@@ -1683,15 +1741,22 @@ export default function RequestCenter() {
     nextSlots[index] = candidate;
     await persistDraft(requestId, nextSlots);
   };
+const handleRemoveSerial = (index) => {
+  setBuilder((current) => {
+    const nextSlots = [...current.slots];
 
-  const handleRemoveSerial = (index) => {
-    setBuilder((current) => ({
+    nextSlots[index] = "";
+
+    return {
       ...current,
+      slots: nextSlots,
       editingIndex: index,
       editValue: "",
-    }));
-    setBuilderError("");
-  };
+    };
+  });
+
+  setBuilderError("");
+};
 
   const handleConfirmPackage = async () => {
     const requestId = builder.request?.requestId;
@@ -2029,3 +2094,6 @@ export default function RequestCenter() {
     </div>
   );
 }
+
+
+
