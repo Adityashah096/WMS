@@ -14,13 +14,36 @@ import { ScanModule } from './scan/scan.module';
     // Database connection
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT ?? '5432') || 5432,
-      username: process.env.DB_USERNAME || 'postgres',
-      password: process.env.DB_PASSWORD || 'admin@123',
-      database: process.env.DB_NAME || 'robot_tracking',
-      synchronize: false,
-      logging: false,
+      host:
+  process.env.BETA_DB_HOST ||
+  process.env.PRD_DB_HOST ||
+  process.env.DB_HOST ||
+  'localhost',
+
+port: parseInt(
+  process.env.BETA_DB_PORT ||
+  process.env.PRD_DB_PORT ||
+  process.env.DB_PORT ||
+  '5432'
+),
+
+username:
+  process.env.BETA_DB_USERNAME ||
+  process.env.PRD_DB_USERNAME ||
+  process.env.DB_USERNAME ||
+  'postgres',
+
+password:
+  process.env.BETA_DB_PASSWORD ||
+  process.env.PRD_DB_PASSWORD ||
+  process.env.DB_PASSWORD ||
+  'admin@123',
+
+database:
+  process.env.BETA_DB_NAME ||
+  process.env.PRD_DB_NAME ||
+  process.env.DB_NAME ||
+  'robot_tracking',
     }),
 
     // Modules

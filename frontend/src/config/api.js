@@ -1,7 +1,10 @@
 const trimTrailingSlash = (value) => value.replace(/\/+$/, "");
 
 const getApiBaseUrl = () => {
-  const configuredBaseUrl = process.env.REACT_APP_API_BASE_URL?.trim();
+  const configuredBaseUrl =
+  process.env.BETA_REACT_APP_API_BASE_URL?.trim() ||
+  process.env.PRD_REACT_APP_API_BASE_URL?.trim() ||
+  process.env.REACT_APP_API_BASE_URL?.trim();;
 
   if (configuredBaseUrl) {
     return trimTrailingSlash(configuredBaseUrl);

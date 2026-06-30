@@ -11,7 +11,11 @@ import { UsersModule } from '../users/users.module';
     UsersModule,
     PassportModule,
     JwtModule.register({
-      secret: process.env.JWT_SECRET || 'fallback-secret-change-in-production',
+      secret:
+  process.env.BETA_JWT_SECRET ||
+  process.env.PRD_JWT_SECRET ||
+  process.env.JWT_SECRET ||
+  'fallback-secret-change-in-production',
       signOptions: { expiresIn: '7d' },
     }),
   ],
